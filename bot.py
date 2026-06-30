@@ -2,15 +2,14 @@ import os
 import telebot
 from telebot import types
 import sqlite3
-import qrcode
-from io import BytesIO
 import random
+import urllib.parse  # QR कोड URL बनाने के लिए (इन-बिल्ट लाइब्रेरी)
 from keep_alive import keep_alive  # 24/7 लाइव रखने के लिए
 
 # --- कॉन्फ़िगरेशन ---
 BOT_TOKEN = "8773587737:AAETKKc0UA6PIijkyMPj9xo9BwnonPnNrTQ"
-BOT_ID = 8429344650          # आपकी बोट आईडी
-ADMIN_USERNAME = "sheinkamallik"  # बिना @ के यूजरनेम (वेरिफिकेशन के लिए आसान)
+BOT_ID = 8429344650          
+ADMIN_USERNAME = "sheinkamallik"  # बिना @ के यूजरनेम
 ADMIN_PASSWORD = "ABHIJEET125"
 UPI_ID = "abhijeet06@fam"
 
@@ -20,13 +19,9 @@ bot = telebot.TeleBot(BOT_TOKEN)
 def init_db():
     conn = sqlite3.connect('store.db')
     cursor = conn.cursor()
-    # यूजर्स टेबल
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT)''')
-    # प्रोडक्ट्स टेबल
     cursor.execute('''CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price REAL, description TEXT, file_id TEXT)''')
-    # ऑर्डर्स टेबल
     cursor.execute('''CREATE TABLE IF NOT EXISTS orders (order_id TEXT PRIMARY KEY, user_id INTEGER, product_id INTEGER, utr TEXT, status TEXT)''')
-    # एडमिन आईडी स्टोर करने के लिए (डायनामिक वेरिफिकेशन)
     cursor.execute('''CREATE TABLE IF NOT EXISTS admin_config (key TEXT PRIMARY KEY, value INTEGER)''')
     conn.commit()
     conn.close()
@@ -35,21 +30,15 @@ init_db()
 
 # --- हेल्पर फंक्शन्स ---
 def generate_order_id():
-    # Abh-12-67 फॉर्मेट में यूनीक आईडी जनरेट करना
     num1 = random.randint(10, 99)
     num2 = random.randint(10, 99)
     return f"Abh-{num1}-{num2}"
 
-def generate_upi_qr(price, order_id):
-    upi_url = f"upi://pay?pa={UPI_ID}&pn=AbhijeetStore&am={price}&cu=INR&tn=Order_{order_id}"
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(upi_url)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    bio = BytesIO()
-    img.save(bio, 'PNG')
-    bio.seek(0)
-    return bio
+def get_upi_qr_url(price, order_id):
+    # Google Chart API का उपयोग करके सीधे QR Code का URL बनाना (No Pillow Required!)
+    upi_string = f"upi://pay?pa={UPI_ID}&pn=AbhijeetStore&am={price}&cu=INR&tn=Order_{order_id}"
+    encoded_upi = urllib.parse.quote(upi_string)
+    return f"https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl={encoded_upi}"
 
 def get_stored_admin_id():
     conn = sqlite3.connect('store.db')
@@ -67,16 +56,14 @@ def set_stored_admin_id(user_id):
     conn.close()
 
 # --- स्टेट मैनेजमेंट ---
-admin_sessions = {}  # {'user_id': True}
-user_states = {}    # स्टेप-बाय-स्टेप इनपुट के लिए
+admin_sessions = {}  
+user_states = {}    
 
 # --- कमांड्स हैंडलर ---
-
 def register_user(message):
     conn = sqlite3.connect('store.db')
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (message.from_user.id, message.from_user.username))
-    # अगर सही एडमिन यूजरनेम वाला बंदा /start करता है, तो उसकी आईडी ऑटो-सेव हो जाएगी
     if message.from_user.username and message.from_user.username.lower() == ADMIN_USERNAME.lower():
         set_stored_admin_id(message.from_user.id)
     conn.commit()
@@ -100,7 +87,7 @@ def show_services(message):
     conn.close()
     
     if not products:
-        bot.send_message(message.chat.id, "🚫 वर्तमान में कोई प्रोडक्ट उपलब्ध नहीं है।")
+        bot.send_message(message.chat.id, "🚫 वर्तमान में कोई <product> उपलब्ध नहीं है।")
         return
         
     for prod in products:
@@ -156,7 +143,7 @@ def keyboard_handler(message):
 def check_password(message):
     if message.text == ADMIN_PASSWORD:
         admin_sessions[message.from_user.id] = True
-        set_stored_admin_id(message.from_user.id) # आपकी असली ID को सुरक्षित सेव कर लेगा
+        set_stored_admin_id(message.from_user.id) 
         user_states[message.from_user.id] = None
         bot.send_message(message.chat.id, "🔓 पासवर्ड सही है! एडमिन पैनल अनलॉक हो गया।")
         show_admin_panel(message.chat.id)
@@ -172,7 +159,7 @@ def show_admin_panel(chat_id):
     )
     bot.send_message(chat_id, "🛠 *Admin Panel*", parse_mode="Markdown", reply_markup=markup)
 
-# --- ब्रॉडकास्ट कमांड (/broadcast <message>) ---
+# --- ब्रॉडकास्ट कमांड ---
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
     actual_admin_id = get_stored_admin_id()
@@ -200,7 +187,7 @@ def execute_broadcast(text, admin_id):
             pass
     bot.send_message(admin_id, f"✅ ब्रॉडकास्ट पूरा हुआ। {count} यूजर्स को मैसेज भेजा गया।")
 
-# --- कॉलबैक क्वेरी (इनलाइन बटन्स) हैंडलर ---
+# --- कॉलबैक क्वेरी हैंडलर ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -217,7 +204,7 @@ def handle_callbacks(call):
         
         if prod:
             name, price = prod
-            qr_img = generate_upi_qr(price, order_id)
+            qr_url = get_upi_qr_url(price, order_id) # बिना लाइब्रेरी वाला QR Code URL
             
             conn = sqlite3.connect('store.db')
             cursor = conn.cursor()
@@ -225,9 +212,10 @@ def handle_callbacks(call):
             conn.commit()
             conn.close()
             
+            # अब सीधे URL से इमेज भेजी जाएगी, कोई लोकल फाइल बफरिंग का झंझट नहीं
             bot.send_photo(
                 call.message.chat.id, 
-                qr_img, 
+                qr_url, 
                 caption=f"🆔 *Order ID:* `{order_id}`\n📦 *Item:* {name}\n💰 *Amount:* ₹{price}\n\n🛑 ऊपर दिए गए क्यूआर कोड को स्कैन करके पेमेंट करें।\n\n👇 भुगतान करने के बाद, कृपया **12-डिजिट का UTR नंबर** यहाँ टाइप करें:"
             )
             user_states[user_id] = f"waiting_for_utr_{order_id}"
@@ -295,7 +283,7 @@ def handle_callbacks(call):
                 
         conn.close()
 
-# --- यूजर और एडमिन इनपुट प्रोसेसिंग ---
+# --- इनपुट प्रोसेसिंग ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'document'])
 def handle_all_inputs(message):
     user_id = message.from_user.id
@@ -319,9 +307,8 @@ def handle_all_inputs(message):
         conn.close()
         
         user_states[user_id] = None
-        bot.send_message(message.chat.id, f"⏳ धन्यवाद! आपका UTR `{utr}` वेरिफिकेशन के लिए भेज दिया गया है। मैन्युअल वेरिफिकेशन के बाद प्रोडक्ट ऑटोमैटिक मिल जाएगा।")
+        bot.send_message(message.chat.id, f"⏳ धन्यवाद! आपका UTR `{utr}` वेरिफिकेशन के लिए भेज दिया गया है।")
         
-        # एडमिन वेरिफिकेशन के लिए अलर्ट भेजना
         username = f"@{message.from_user.username}" if message.from_user.username else f"[User](tg://user?id={user_id})"
         admin_markup = types.InlineKeyboardMarkup()
         admin_markup.add(
@@ -329,7 +316,6 @@ def handle_all_inputs(message):
             types.InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{order_id}")
         )
         
-        # अगर एडमिन ने बोट में कभी भी पासवर्ड डाला है या /start किया है, तो उसे सीधा वेरिफिकेशन मैसेज जाएगा
         if actual_admin_id:
             bot.send_message(
                 actual_admin_id, 
@@ -337,8 +323,6 @@ def handle_all_inputs(message):
                 parse_mode="Markdown", 
                 reply_markup=admin_markup
             )
-        else:
-            print("⚠️ Admin ID still not linked. Admin needs to type password in bot first.")
 
     elif state == "add_prod_name":
         user_states[user_id] = {"name": message.text, "state": "add_prod_price"}
@@ -352,7 +336,7 @@ def handle_all_inputs(message):
             user_states[user_id] = state
             bot.send_message(message.chat.id, "📝 प्रोडक्ट का विवरण (Description) भेजें:")
         except ValueError:
-            bot.send_message(message.chat.id, "⚠️ कृपया केवल नंबर भेजें ( can be decimal like 150 ):")
+            bot.send_message(message.chat.id, "⚠️ कृपया केवल नंबर भेजें:")
             
     elif isinstance(state, dict) and state.get("state") == "add_prod_desc":
         state["desc"] = message.text
@@ -380,9 +364,8 @@ def handle_all_inputs(message):
         user_states[user_id] = None
         execute_broadcast(message.text, message.from_user.id)
 
-# --- बोट रनिंग लॉजिक ---
 if __name__ == '__main__':
-    keep_alive()  # वेब सर्वर शुरू करें 
-    print("Bot is starting without any lagging...")
+    keep_alive()  
+    print("Bot is starting perfectly...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
-  
+    
