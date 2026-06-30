@@ -7,7 +7,7 @@ import urllib.parse
 from threading import Thread
 from flask import Flask
 
-# --- Flask Server for Render ---
+# --- Flask Server for Render (Fixes Port Timeout Error) ---
 app = Flask('')
 
 @app.route('/')
@@ -15,13 +15,14 @@ def home():
     return "Bot is running perfectly!"
 
 def run_flask():
+    # Render डिफ़ॉल्ट रूप से PORT प्रदान करता है, बोट को इसी पर रन करना ज़रूरी है
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- कॉन्फ़िगरेशन ---
-BOT_TOKEN = "8711537411:AAHhC1rSW7TpkXOhWGbt6LzXQ5W4OE-Ig7w"
+# --- कॉन्फ़िगरेशन (आपका नया टोकन और यूजरनेम) ---
+BOT_TOKEN = "8679430462:AAHTDNMZja0-LkLa8xXuw5G8iST_Ka7c1u4"
 BOT_ID = 8429344650          
-ADMIN_USERNAME = "sheinkamallik"  # आपका टेलीग्राम यूजरनेम (बिना @ के)
+ADMIN_USERNAME = "sheinkamallik"  # बिना @ के यूजरनेम
 UPI_ID = "abhijeet06@fam"
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -41,11 +42,13 @@ init_db()
 
 # --- हेल्पर फंक्शन्स ---
 def generate_order_id():
+    # Abh-12-67 फॉर्मेट में ऑटो-इन्क्रीमेंट स्टाइल आईडी जनरेट करना
     num1 = random.randint(10, 99)
     num2 = random.randint(10, 99)
     return f"Abh-{num1}-{num2}"
 
 def get_upi_qr_url(price, order_id):
+    # Google API से सुपरफास्ट QR जनरेशन, बिना किसी एरर और लैग के
     upi_string = f"upi://pay?pa={UPI_ID}&pn=AbhijeetStore&am={price}&cu=INR&tn=Order_{order_id}"
     encoded_upi = urllib.parse.quote(upi_string)
     return f"https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl={encoded_upi}"
@@ -68,19 +71,20 @@ def set_stored_admin_id(user_id):
 # --- स्टेट मैनेजमेंट ---
 user_states = {}    
 
-# --- कमांड्स और रजिस्ट्रेशन ---
+# --- यूजर रजिस्ट्रेशन ---
 def register_user(message):
     conn = sqlite3.connect('store.db')
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (message.from_user.id, message.from_user.username))
     
-    # यदि आपका यूजरनेम मैच होता है, तो बोट आपकी आईडी को एडमिन आईडी बना देगा (/start करते ही)
+    # जैसे ही आप /start दबाएंगे, बोट ऑटोमैटिकली आपके यूजरनेम को एडमिन आईडी बना देगा
     if message.from_user.username and message.from_user.username.lower() == ADMIN_USERNAME.lower():
         set_stored_admin_id(message.from_user.id)
         
     conn.commit()
     conn.close()
 
+# --- कमांड्स हैंडलर ---
 @bot.message_handler(commands=['start', 'menu'])
 def send_menu(message):
     register_user(message)
@@ -133,7 +137,7 @@ def show_history(message):
 def send_help(message):
     bot.send_message(message.chat.id, f"📞 किसी भी समस्या या सहायता के लिए एडमिन @{ADMIN_USERNAME} से संपर्क करें।")
 
-# --- कीबोर्ड बटन्स हैंडलर ---
+# --- कीबोर्ड बटन्स रिस्पॉन्स ---
 @bot.message_handler(func=lambda m: m.text in ["🛒 Services", "📜 History", "📞 Help", "🔐 Admin Section"])
 def keyboard_handler(message):
     if message.text == "🛒 Services":
@@ -144,7 +148,7 @@ def keyboard_handler(message):
         send_help(message)
     elif message.text == "🔐 Admin Section":
         actual_admin_id = get_stored_admin_id()
-        # बिना पासवर्ड के सिर्फ आपके यूजरनेम/आईडी के आधार पर एक्सेस मिलेगा
+        # पासवर्ड की कोई जरूरत नहीं, सीधा आईडी वेरिफिकेशन
         if actual_admin_id and message.from_user.id == actual_admin_id:
             show_admin_panel(message.chat.id)
         else:
@@ -159,7 +163,7 @@ def show_admin_panel(chat_id):
     )
     bot.send_message(chat_id, "🛠 *Admin Panel*", parse_mode="Markdown", reply_markup=markup)
 
-# --- ब्रॉडकास्ट कमांड ---
+# --- एडमिन ब्रॉडकास्ट कमांड ---
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
     actual_admin_id = get_stored_admin_id()
@@ -187,7 +191,7 @@ def execute_broadcast(text, admin_id):
             pass
     bot.send_message(admin_id, f"✅ ब्रॉडकास्ट पूरा हुआ। {count} यूजर्स को मैसेज भेजा गया।")
 
-# --- कॉलबैक क्वेरी हैंडलर ---
+# --- बटन कॉलबैक (Inlines) ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     user_id = call.from_user.id
@@ -242,7 +246,7 @@ def handle_callbacks(call):
         cursor.execute("DELETE FROM products WHERE id = ?", (p_id,))
         conn.commit()
         conn.close()
-        bot.answer_callback_query(call.id, "Product Removed Successfully!")
+        bot.answer_callback_query(call.id, "Product Removed!")
         bot.edit_message_text("✅ प्रोडक्ट हटा दिया गया है।", call.message.chat.id, call.message.message_id)
 
     elif call.data == "admin_broadcast":
@@ -282,7 +286,7 @@ def handle_callbacks(call):
                 
         conn.close()
 
-# --- इनपुट प्रोसेसिंग ---
+# --- टेक्स्ट एवं इनपुट मैनेजमेंट ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'document'])
 def handle_all_inputs(message):
     user_id = message.from_user.id
@@ -364,9 +368,10 @@ def handle_all_inputs(message):
         execute_broadcast(message.text, message.from_user.id)
 
 if __name__ == '__main__':
+    # फ्लैस्क को बैकग्राउंड थ्रेड में चलाएं
     server_thread = Thread(target=run_flask)
     server_thread.start()
     
-    print("Bot is running perfectly without passwords...")
+    print("Bot is starting perfectly...")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
         
