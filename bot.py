@@ -3,14 +3,25 @@ import telebot
 from telebot import types
 import sqlite3
 import random
-import urllib.parse  # QR कोड URL बनाने के लिए (इन-बिल्ट लाइब्रेरी)
-from keep_alive import keep_alive  # 24/7 लाइव रखने के लिए
+import urllib.parse
+from threading import Thread
+from flask import Flask
+
+# --- Flask Server for Render ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # --- कॉन्फ़िगरेशन ---
-BOT_TOKEN = "8773587737:AAETKKc0UA6PIijkyMPj9xo9BwnonPnNrTQ"
+BOT_TOKEN = "8711537411:AAHhC1rSW7TpkXOhWGbt6LzXQ5W4OE-Ig7w"
 BOT_ID = 8429344650          
-ADMIN_USERNAME = "sheinkamallik"  # बिना @ के यूजरनेम
-ADMIN_PASSWORD = "ABHIJEET125"
+ADMIN_USERNAME = "sheinkamallik"  # आपका टेलीग्राम यूजरनेम (बिना @ के)
 UPI_ID = "abhijeet06@fam"
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -35,7 +46,6 @@ def generate_order_id():
     return f"Abh-{num1}-{num2}"
 
 def get_upi_qr_url(price, order_id):
-    # Google Chart API का उपयोग करके सीधे QR Code का URL बनाना (No Pillow Required!)
     upi_string = f"upi://pay?pa={UPI_ID}&pn=AbhijeetStore&am={price}&cu=INR&tn=Order_{order_id}"
     encoded_upi = urllib.parse.quote(upi_string)
     return f"https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl={encoded_upi}"
@@ -56,16 +66,18 @@ def set_stored_admin_id(user_id):
     conn.close()
 
 # --- स्टेट मैनेजमेंट ---
-admin_sessions = {}  
 user_states = {}    
 
-# --- कमांड्स हैंडलर ---
+# --- कमांड्स और रजिस्ट्रेशन ---
 def register_user(message):
     conn = sqlite3.connect('store.db')
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (message.from_user.id, message.from_user.username))
+    
+    # यदि आपका यूजरनेम मैच होता है, तो बोट आपकी आईडी को एडमिन आईडी बना देगा (/start करते ही)
     if message.from_user.username and message.from_user.username.lower() == ADMIN_USERNAME.lower():
         set_stored_admin_id(message.from_user.id)
+        
     conn.commit()
     conn.close()
 
@@ -87,7 +99,7 @@ def show_services(message):
     conn.close()
     
     if not products:
-        bot.send_message(message.chat.id, "🚫 वर्तमान में कोई <product> उपलब्ध नहीं है।")
+        bot.send_message(message.chat.id, "🚫 वर्तमान में कोई प्रोडक्ट उपलब्ध नहीं है।")
         return
         
     for prod in products:
@@ -121,7 +133,7 @@ def show_history(message):
 def send_help(message):
     bot.send_message(message.chat.id, f"📞 किसी भी समस्या या सहायता के लिए एडमिन @{ADMIN_USERNAME} से संपर्क करें।")
 
-# --- टेक्स्ट मैचिंग (कीबोर्ड बटन्स) ---
+# --- कीबोर्ड बटन्स हैंडलर ---
 @bot.message_handler(func=lambda m: m.text in ["🛒 Services", "📜 History", "📞 Help", "🔐 Admin Section"])
 def keyboard_handler(message):
     if message.text == "🛒 Services":
@@ -132,23 +144,11 @@ def keyboard_handler(message):
         send_help(message)
     elif message.text == "🔐 Admin Section":
         actual_admin_id = get_stored_admin_id()
-        if (actual_admin_id and message.from_user.id == actual_admin_id) or admin_sessions.get(message.from_user.id):
+        # बिना पासवर्ड के सिर्फ आपके यूजरनेम/आईडी के आधार पर एक्सेस मिलेगा
+        if actual_admin_id and message.from_user.id == actual_admin_id:
             show_admin_panel(message.chat.id)
         else:
-            bot.send_message(message.chat.id, "🔑 इस सेक्शन को अनलॉक करने के लिए एडमिन पासवर्ड डालें:")
-            user_states[message.from_user.id] = 'waiting_for_password'
-
-# --- पासवर्ड और एडमिन लॉजिक ---
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == 'waiting_for_password')
-def check_password(message):
-    if message.text == ADMIN_PASSWORD:
-        admin_sessions[message.from_user.id] = True
-        set_stored_admin_id(message.from_user.id) 
-        user_states[message.from_user.id] = None
-        bot.send_message(message.chat.id, "🔓 पासवर्ड सही है! एडमिन पैनल अनलॉक हो गया।")
-        show_admin_panel(message.chat.id)
-    else:
-        bot.send_message(message.chat.id, "❌ गलत पासवर्ड! दोबारा कोशिश करें।")
+            bot.send_message(message.chat.id, "❌ आपके पास एडमिन राइट्स नहीं हैं।")
 
 def show_admin_panel(chat_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -163,7 +163,7 @@ def show_admin_panel(chat_id):
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
     actual_admin_id = get_stored_admin_id()
-    if message.from_user.id != actual_admin_id and not admin_sessions.get(message.from_user.id):
+    if not actual_admin_id or message.from_user.id != actual_admin_id:
         return
     text = message.text.replace("/broadcast", "").strip()
     if not text:
@@ -204,7 +204,7 @@ def handle_callbacks(call):
         
         if prod:
             name, price = prod
-            qr_url = get_upi_qr_url(price, order_id) # बिना लाइब्रेरी वाला QR Code URL
+            qr_url = get_upi_qr_url(price, order_id)
             
             conn = sqlite3.connect('store.db')
             cursor = conn.cursor()
@@ -212,7 +212,6 @@ def handle_callbacks(call):
             conn.commit()
             conn.close()
             
-            # अब सीधे URL से इमेज भेजी जाएगी, कोई लोकल फाइल बफरिंग का झंझट नहीं
             bot.send_photo(
                 call.message.chat.id, 
                 qr_url, 
@@ -365,7 +364,9 @@ def handle_all_inputs(message):
         execute_broadcast(message.text, message.from_user.id)
 
 if __name__ == '__main__':
-    keep_alive()  
-    print("Bot is starting perfectly...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    server_thread = Thread(target=run_flask)
+    server_thread.start()
     
+    print("Bot is running perfectly without passwords...")
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        
